@@ -1,6 +1,6 @@
 # Learning by Competition of Self-Interested Reinforcement Learning Agents
 
-This repository is the official implementation of the paper "Learning by Competition of Self-Interested Reinforcement Learning Agents".
+This repository is the official implementation of the paper "Learning by Competition of Self-Interested Reinforcement Learning Agents". (https://arxiv.org/abs/2010.09770)
 
 ## Requirements
 
