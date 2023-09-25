@@ -61,7 +61,7 @@ actor_output_l_type = L_DISCRETE
 reward_lim = None if reward_lim <=0 else reward_lim
 
 h_reg, entro_reg, critic_var, actor_var = 0, 0, 0, 0
-actor_bp, baseline, unbiased, det, zero_learn = False, False, False, False, False
+actor_bp, baseline, det, zero_learn = False, False, False, False
 
 # optimizer
 critic_opt = "adam" # optimizer adam or simple
@@ -84,8 +84,7 @@ if env_name != "multiplexer":
                                                  temp=None, hidden_l_type=critic_l_type, output_l_type=L_LINEAR, opt=critic_opt, beta_1=beta_1, beta_2=beta_2,)     
 
         actor_net = Network(state_n=env.state.shape[1], action_n=action_n, hidden=actor_hidden, var=actor_var, 
-                                             temp=temp, hidden_l_type=actor_l_type, output_l_type=actor_output_l_type, opt=actor_opt, beta_1=beta_1, beta_2=beta_2,
-                                             unbiased=unbiased)
+                                             temp=temp, hidden_l_type=actor_l_type, output_l_type=actor_output_l_type, opt=actor_opt, beta_1=beta_1, beta_2=beta_2)
 
 
         eps_ret_hist = []
@@ -154,8 +153,7 @@ else:
     print_every = 32*500  
     for j in range(n_run): 
         net = Network(state_n=env.x_size, action_n=1,  hidden=actor_hidden, var=actor_var, temp=temp, 
-                                 hidden_l_type=actor_l_type, output_l_type=L_BINARY_Z, opt=actor_opt, beta_1=beta_1, beta_2=beta_2,
-                                 unbiased=unbiased
+                                 hidden_l_type=actor_l_type, output_l_type=L_BINARY_Z, opt=actor_opt, beta_1=beta_1, beta_2=beta_2,                                 
                                  )  
         eps_ret_hist = []
         print_count = print_every         
