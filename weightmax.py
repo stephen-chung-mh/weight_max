@@ -31,7 +31,7 @@ ACT_D_F = {L_SOFTPLUS: sigmoid,
                      }
 
 class eq_prop_layer():
-    def __init__(self, name, input_size, output_size, optimizer, var, temp, l_type, unbiased=False):
+    def __init__(self, name, input_size, output_size, optimizer, var, temp, l_type):
         if l_type not in [L_SOFTPLUS, L_RELU, L_LINEAR, L_SIGMOID, L_DISCRETE, L_BINARY_Z, L_BINARY_N, ]:
             raise Exception('l_type (%d) not implemented' % l_type)
 
@@ -41,7 +41,6 @@ class eq_prop_layer():
         self.optimizer = optimizer
         self.l_type = l_type
         self.temp = temp if l_type in LS_DISCRETE else 1
-        self.unbiased = unbiased
         
         lim = np.sqrt(6 / (input_size + output_size))       
         if l_type == L_DISCRETE: output_size -= 1
@@ -55,11 +54,7 @@ class eq_prop_layer():
         
         self.w_trace = np.zeros((1, input_size, output_size,))
         self.b_trace = np.zeros((1, output_size,)) 
-        
-        if self.unbiased:
-            self.p_w_trace = np.zeros((1, input_size, output_size,))
-            self.p_b_trace = np.zeros((1, output_size,)) 
-        
+                
     def sample(self, inputs, det=False):    
         self.compute_pot_mean(inputs)          
         if self.l_type in LS_REAL:
@@ -98,38 +93,10 @@ class eq_prop_layer():
         if self.l_type in LS_REAL:
             v_ch = dev * ACT_D_F[self.l_type](self.pot) * self._inv_var
         elif self.l_type in [L_BINARY_Z, L_BINARY_N]:
-            v_ch = dev / self.temp
-            if self.unbiased:
-                act_p = sigmoid(zero_to_neg(self.values) * self.pot)            
-                elem_sum = self.inputs[:,:,np.newaxis]*self._w[np.newaxis, :, :]                
-                v_ch_w = (act_p[:, np.newaxis, :] - 
-                    sigmoid(zero_to_neg(self.values)[:, np.newaxis, :] * (self.pot[:, np.newaxis, :] - elem_sum)))/self._w    
-                v_ch_b = (act_p - sigmoid(zero_to_neg(self.values)* (self.pot - self._b)))/self._b                        
-                v_ch_w /= act_p[:, np.newaxis, :]
-                v_ch_b /= act_p       
-                self.p_w_trace = lambda_ * self.p_w_trace + v_ch_w
-                self.p_b_trace = lambda_ * self.p_b_trace + v_ch_b
+            v_ch = dev / self.temp            
                 
         elif self.l_type == L_DISCRETE:  
-            v_ch = (dev / self.temp)[:, :-1]
-            if self.unbiased:
-                act_p = np.sum(self.mean * self.values, axis=-1)
-                elem_sum = self.inputs[:,:,np.newaxis]*self._w[np.newaxis, :, :]  
-                elem_sum = np.concatenate([elem_sum, np.zeros((elem_sum.shape[0], elem_sum.shape[1], 1))], axis=-1)
-
-                expanded = np.zeros(elem_sum.shape + elem_sum.shape[-1:], dtype=elem_sum.dtype)
-                diagonals = np.diagonal(expanded, axis1=-2, axis2=-1)
-                diagonals.setflags(write=True)
-                diagonals[:] = elem_sum
-                v_ch_w = (act_p[:, np.newaxis, np.newaxis] - np.sum(softmax(self.pot[:, np.newaxis, np.newaxis, :] - expanded, axis=-1)*self.values[:, np.newaxis,  np.newaxis, :], -1))[:, :, :-1]/self._w
-                b_z = np.concatenate([self._b, np.zeros(1)], axis=-1)
-                v_ch_b = (act_p[:, np.newaxis] - np.sum(softmax(self.pot[:, np.newaxis, :] - np.diag(b_z), axis=-1)*self.values[:, np.newaxis, :], -1))[:, :-1]//self._b
-
-                v_ch_w /= act_p[:, np.newaxis, np.newaxis]
-                v_ch_b /= act_p[:, np.newaxis]
-                self.p_w_trace = lambda_ * self.p_w_trace + v_ch_w
-                self.p_b_trace = lambda_ * self.p_b_trace + v_ch_b
-                          
+            v_ch = (dev / self.temp)[:, :-1]     
         
         if det: v_ch = v_ch * recip_z(self.values)
         if zero_learn: v_ch[self.values == 0] = 0.   
@@ -143,13 +110,9 @@ class eq_prop_layer():
         w_update = self.w_trace * reward[:, np.newaxis, :]   
         b_update = self.b_trace * reward
         
-        if not self.unbiased:
-            self.w_update = w_update
-            self.b_update = b_update
-        else:
-            self.w_update = self.p_w_trace * reward[:, np.newaxis, :] 
-            self.b_update = self.p_b_trace * reward
-        
+        self.w_update = w_update
+        self.b_update = b_update
+                
         if h_reg > 0:            
             v_ch = h_reg * ACT_D_F[self.l_type](self.pot) / self.temp
             w_update -= self.inputs[:, :, np.newaxis] * v_ch[:, np.newaxis, :] 
@@ -178,10 +141,6 @@ class eq_prop_layer():
     def clear_trace(self, mask):    
         self.w_trace = self.w_trace * (mask.astype(np.float))[:, np.newaxis, np.newaxis]
         self.b_trace = self.b_trace * (mask.astype(np.float))[:, np.newaxis]
-        
-        if self.unbiased:
-          self.p_w_trace = self.p_w_trace * (mask.astype(np.float))[:, np.newaxis, np.newaxis]
-          self.p_b_trace = self.p_b_trace * (mask.astype(np.float))[:, np.newaxis]
  
     def backprop(self, grad, w_reg=0, w_reg_p=0, h_reg=0, entro_reg=0, lambda_=0):   
         if self.next_layer is None:
@@ -197,7 +156,7 @@ class eq_prop_layer():
             
 class Network():
     def __init__(self, state_n, action_n, hidden, var, temp, hidden_l_type, 
-                 output_l_type, opt="adam", beta_1=0.9, beta_2=0.999, unbiased=False):
+                 output_l_type, opt="adam", beta_1=0.9, beta_2=0.999):
         
         self.layers = []    
         in_size = state_n
@@ -210,8 +169,7 @@ class Network():
         for d, n in enumerate(hidden + [action_n]):
             a = eq_prop_layer(name="layer_%d"%d, input_size=in_size, output_size=n, 
                                                 optimizer=optimizer, var=getl(var,d), temp=getl(temp,d),
-                                                l_type=(output_l_type if d==len(hidden) else hidden_l_type),
-                                                unbiased=getl(unbiased,d))
+                                                l_type=(output_l_type if d==len(hidden) else hidden_l_type))
             if d > 0: 
                 a.prev_layer = self.layers[-1]        
                 self.layers[-1].next_layer = a 
